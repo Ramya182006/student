@@ -158,16 +158,6 @@ const Login = () => {
               )}
             </button>
           </form>
-
-          {/* Demo credentials hint */}
-          <div className="mt-6 p-4 bg-white/5 border border-white/10 rounded-xl">
-            <p className="text-xs text-slate-400 font-medium mb-2">Demo Credentials</p>
-            <div className="space-y-1 text-xs text-slate-500">
-              <p>Admin: <span className="text-slate-300">admin@uni.edu / admin123</span></p>
-              <p>Faculty: <span className="text-slate-300">faculty@uni.edu / faculty123</span></p>
-              <p>Student: <span className="text-slate-300">student@uni.edu / student123</span></p>
-            </div>
-          </div>
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">

@@ -134,9 +134,12 @@ const Dashboard = () => {
   const selectedTotal = visibleGradeData.reduce((sum, item) => sum + item.count, 0);
 
   const pieData = [
-    { name: 'Pass', value: kpis ? kpis.totalStudents - kpis.failCount : 0 },
+    { name: 'Pass', value: kpis ? Math.max(0, kpis.totalStudents - kpis.failCount) : 0 },
     { name: 'Fail', value: kpis?.failCount ?? 0 },
   ];
+  const safePassPercentage = kpis?.passPercentage !== undefined
+    ? Math.max(0, Math.min(100, Number(kpis.passPercentage)))
+    : null;
 
   const quickActions = [
     { label: 'Add Student', to: '/students/add', icon: Plus, color: 'bg-indigo-600 hover:bg-indigo-700', roles: ['admin'] },
@@ -206,13 +209,13 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="mx-auto max-w-7xl space-y-4">
       {/* Page header */}
       <div>
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800">Dashboard</h2>
-            <p className="text-slate-500 text-sm mt-0.5">
+            <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
               Welcome back, <span className="font-semibold text-indigo-600">{user?.name}</span>
             </p>
           </div>
@@ -222,8 +225,8 @@ const Dashboard = () => {
                 key={option}
                 type="button"
                 onClick={() => setRange(option)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                  range === option ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  range === option ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'
                 }`}
               >
                 {option}
@@ -238,9 +241,9 @@ const Dashboard = () => {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {loading ? (
-          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)
         ) : (
           <>
             <KPIBox
@@ -257,7 +260,7 @@ const Dashboard = () => {
             />
             <KPIBox
               title="Pass Rate"
-              value={kpis?.passPercentage !== undefined ? `${kpis.passPercentage}%` : '—'}
+              value={safePassPercentage !== null ? `${safePassPercentage}%` : '—'}
               icon={Award}
               gradient="bg-gradient-to-br from-violet-500 to-purple-700"
             />
@@ -273,13 +276,13 @@ const Dashboard = () => {
 
       {/* Charts */}
       {!loading && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Grade Distribution Bar Chart */}
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="lg:col-span-2 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold text-slate-700">Grade Distribution</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <h3 className="text-sm font-bold text-slate-800">Grade Distribution</h3>
+                <p className="mt-0.5 text-xs text-slate-400">
                   {selectedGrade === 'All' ? `${selectedTotal} records shown` : `${selectedGrade} grade selected`}
                 </p>
               </div>
@@ -289,7 +292,7 @@ const Dashboard = () => {
                     key={grade}
                     type="button"
                     onClick={() => setSelectedGrade(grade)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
                       selectedGrade === grade ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                     }`}
                   >
@@ -298,7 +301,7 @@ const Dashboard = () => {
                 ))}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={190}>
               <BarChart data={visibleGradeData} barCategoryGap="30%">
                 <XAxis dataKey="grade" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -326,16 +329,16 @@ const Dashboard = () => {
           </div>
 
           {/* Pass/Fail Pie Chart */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-            <h3 className="text-base font-semibold text-slate-700 mb-4">Pass vs Fail</h3>
-            <ResponsiveContainer width="100%" height={240}>
+          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-sm font-bold text-slate-800">Pass vs Fail</h3>
+            <ResponsiveContainer width="100%" height={190}>
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
+                  innerRadius={48}
+                  outerRadius={74}
                   paddingAngle={4}
                   dataKey="value"
                 >
@@ -352,14 +355,14 @@ const Dashboard = () => {
 
       {/* Quick Actions */}
       {quickActions.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-          <h3 className="text-base font-semibold text-slate-700 mb-4">Quick Actions</h3>
-          <div className="flex flex-wrap gap-3">
+        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Quick Actions</h3>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             {quickActions.map(({ label, to, icon: Icon, color }) => (
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-2 px-5 py-2.5 ${color} text-white text-sm font-medium rounded-xl transition-colors shadow-sm`}
+                className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 ${color}`}
               >
                 <Icon className="w-4 h-4" />
                 {label}
@@ -370,7 +373,7 @@ const Dashboard = () => {
       )}
 
       {!loading && user?.role === 'admin' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
           {assignToast && (
             <div className="fixed top-4 right-4 z-50 rounded-xl bg-slate-800 px-4 py-3 text-sm text-white shadow-xl">
               {assignToast}
@@ -379,7 +382,7 @@ const Dashboard = () => {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-                <Layers className="w-4 h-4 text-indigo-600" />
+                <Layers className="h-4 w-4 text-indigo-600" />
                 Assign Faculty To Class Students
               </h3>
               <p className="mt-0.5 text-xs text-slate-400">
@@ -401,7 +404,7 @@ const Dashboard = () => {
             </button>
           </div>
 
-          <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <label className="block">
               <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Department</span>
               <select
@@ -436,7 +439,7 @@ const Dashboard = () => {
 
           <div className="mt-4 space-y-2">
             {bulkForm.rows.map((row, index) => (
-              <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 rounded-xl bg-slate-50 p-3">
+              <div key={index} className="grid grid-cols-1 gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
                 <select
                   value={row.subject}
                   onChange={(e) => updateBulkRow(index, 'subject', e.target.value)}
@@ -481,7 +484,7 @@ const Dashboard = () => {
       )}
 
       {!loading && user?.role === 'faculty' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="text-base font-semibold text-slate-700">My Assigned Students</h3>
@@ -494,7 +497,7 @@ const Dashboard = () => {
             </span>
           </div>
 
-          <div className="mb-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <select
               value={facultyStudentFilters.department}
               onChange={(event) => setFacultyStudentFilters((prev) => ({ ...prev, department: event.target.value }))}
@@ -588,8 +591,8 @@ const Dashboard = () => {
       )}
 
       {!loading && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm lg:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
                 <h3 className="text-base font-semibold text-slate-700">
@@ -632,15 +635,15 @@ const Dashboard = () => {
             )}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
             <h3 className="text-base font-semibold text-slate-700 mb-4">
               {user?.role === 'admin' ? 'Admin Controls' : user?.role === 'faculty' ? 'Faculty Workspace' : 'Student Workspace'}
             </h3>
             <div className="space-y-3">
               {(roleTools[user?.role] || []).map(({ label, icon: Icon }) => (
-                <div key={label} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-600">
-                  <span className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                    <Icon className="w-4 h-4" />
+                <div key={label} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm">
+                    <Icon className="h-4 w-4" />
                   </span>
                   {label}
                 </div>
