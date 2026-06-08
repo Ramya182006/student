@@ -1,0 +1,5 @@
+roll_no,subject_code,internal_marks,external_marks
+S201,MATH101,42,44
+S201,MATH999,40,40
+S999,MATH101,40,40
+S201,MATH101,-2,55

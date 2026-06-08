@@ -1,0 +1,3 @@
+role,name,email,password,department,roll_no,semester,section,admission_year,gender,date_of_birth,phone,guardian_name,guardian_phone,address,designation,handled_sections,handled_subject_codes
+student,Arun Kumar,arun@example.com,student123,CS,CS2023001,1,A,2026,Male,2006-05-12,9876543210,Ravi Kumar,9876543211,Chennai,,,
+faculty,Meena R,meena@example.com,faculty123,CS,,,,,,,,,,,Assistant Professor,A,CS301|CS302
