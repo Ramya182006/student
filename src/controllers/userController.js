@@ -3,6 +3,24 @@ const Subject = require('../models/subjectModel');
 
 const normalizeArray = (value) => Array.isArray(value) ? value.filter(Boolean) : [];
 
+const ensureSubjectsAvailable = async (handledSubjects = [], facultyId = null) => {
+  if (!handledSubjects.length) return;
+
+  const conflicts = await Subject.find({
+    _id: { $in: handledSubjects },
+    assignedFaculty: facultyId ? { $nin: [null, facultyId] } : { $ne: null }
+  }).populate('assignedFaculty', 'name');
+
+  if (conflicts.length) {
+    const details = conflicts
+      .map((subject) => `${subject.name} is already assigned to ${subject.assignedFaculty?.name || 'another faculty'}`)
+      .join(', ');
+    const error = new Error(`Subject already assigned. ${details}`);
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
 const syncFacultySubjects = async (facultyId, handledSubjects = []) => {
   await Subject.updateMany(
     { assignedFaculty: facultyId, _id: { $nin: handledSubjects } },
@@ -88,6 +106,10 @@ const createUser = async (req, res, next) => {
     }
 
     const normalizedSubjects = normalizeArray(handledSubjects);
+    if (role === 'faculty') {
+      await ensureSubjectsAvailable(normalizedSubjects);
+    }
+
     const user = await User.create({
       name,
       email,
@@ -160,7 +182,13 @@ const updateUser = async (req, res, next) => {
     if (phone !== undefined) user.phone = phone;
     if (password) user.password = password; // pre-save hook will hash it
     if (handledSections !== undefined) user.handledSections = normalizeArray(handledSections);
-    if (handledSubjects !== undefined) user.handledSubjects = normalizeArray(handledSubjects);
+    if (handledSubjects !== undefined) {
+      const normalizedSubjects = normalizeArray(handledSubjects);
+      if (user.role === 'faculty') {
+        await ensureSubjectsAvailable(normalizedSubjects, user._id);
+      }
+      user.handledSubjects = normalizedSubjects;
+    }
 
     const updated = await user.save();
 

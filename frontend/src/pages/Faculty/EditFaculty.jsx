@@ -158,14 +158,20 @@ const EditFaculty = () => {
                     multiple
                     size={Math.min(5, Math.max(3, subjects.length || 3))}
                     className={inputClass(errors.handledSubjects)}
-                    {...register('handledSubjects')}
-                  >
-                    {subjects.map(subject => (
-                      <option key={subject._id} value={subject._id}>
-                        {subject.name} ({subject.code})
-                      </option>
-                    ))}
+                {...register('handledSubjects')}
+              >
+                    {subjects.map(subject => {
+                      const assignedFacultyId = subject.assignedFaculty?._id || subject.assignedFaculty;
+                      const assignedToOther = assignedFacultyId && assignedFacultyId !== id;
+                      return (
+                        <option key={subject._id} value={subject._id} disabled={assignedToOther}>
+                          {subject.name} ({subject.code})
+                          {assignedToOther ? ` - assigned to ${subject.assignedFaculty?.name || 'another faculty'}` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
+                  <p className="mt-1 text-xs text-slate-400">Subjects assigned to another faculty are locked.</p>
                 </Field>
               </div>
 

@@ -167,11 +167,13 @@ const AddFaculty = () => {
                 {...register('handledSubjects')}
               >
                 {subjects.map(subject => (
-                  <option key={subject._id} value={subject._id}>
+                  <option key={subject._id} value={subject._id} disabled={Boolean(subject.assignedFaculty)}>
                     {subject.name} ({subject.code})
+                    {subject.assignedFaculty ? ` - assigned to ${subject.assignedFaculty.name}` : ''}
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-slate-400">Already assigned subjects cannot be selected for another faculty.</p>
             </Field>
           </div>
 
