@@ -189,4 +189,46 @@ describe('MarkEntry & Concurrency APIs', () => {
     expect(res.body).toHaveProperty('latestRecord');
     expect(res.body.latestRecord.version).toEqual(2);
   });
+
+  it('should allow explicit overwrite when force flag is sent', async () => {
+    const res = await request(app)
+      .put(`/api/mark-entries/${markEntryId}`)
+      .set('Authorization', `Bearer ${facultyAToken}`)
+      .send({
+        internal_marks: 35,
+        external_marks: 35,
+        version: 1,
+        force: true
+      });
+
+    expect(res.statusCode).toEqual(200);
+    expect(res.body.total).toEqual(70);
+    expect(res.body.grade).toEqual('A');
+    expect(res.body.version).toEqual(3);
+  });
+
+  it('should keep Admin read-only for mark entry create and update APIs', async () => {
+    const createRes = await request(app)
+      .post('/api/mark-entries')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        student_id: studentId,
+        subject_id: subjectId,
+        internal_marks: 30,
+        external_marks: 30
+      });
+
+    expect(createRes.statusCode).toEqual(403);
+
+    const updateRes = await request(app)
+      .put(`/api/mark-entries/${markEntryId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        internal_marks: 45,
+        external_marks: 45,
+        version: 3
+      });
+
+    expect(updateRes.statusCode).toEqual(403);
+  });
 });

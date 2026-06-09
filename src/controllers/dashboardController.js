@@ -97,6 +97,7 @@ const getKPIs = async (req, res, next) => {
     }
 
     const totalStudents = await Student.countDocuments(studentFilter);
+    const evaluatedStudentIds = await MarkEntry.distinct('student_id', markFilter);
 
     const averageScoreResult = await MarkEntry.aggregate([
       { $match: markFilter },
@@ -113,10 +114,32 @@ const getKPIs = async (req, res, next) => {
 
     const distinctFailStudents = await MarkEntry.distinct('student_id', { ...markFilter, grade: 'F' });
     const failCount = distinctFailStudents.length;
+    const evaluatedCount = evaluatedStudentIds.length;
+    const passCount = Math.max(0, evaluatedCount - failCount);
+    const pendingCount = Math.max(0, totalStudents - evaluatedCount);
 
-    const passPercentage = totalStudents > 0 
-      ? parseFloat((((totalStudents - failCount) / totalStudents) * 100).toFixed(2))
+    const passPercentage = evaluatedCount > 0 
+      ? parseFloat(((passCount / evaluatedCount) * 100).toFixed(2))
       : 0;
+
+    const gradeDistributionResult = await MarkEntry.aggregate([
+      { $match: markFilter },
+      {
+        $group: {
+          _id: '$grade',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    const gradeOrder = ['O', 'A+', 'A', 'B+', 'B', 'C', 'F'];
+    const gradeDistribution = gradeOrder
+      .map((grade) => ({
+        grade,
+        count: gradeDistributionResult.find((item) => item._id === grade)?.count || 0
+      }))
+      .filter((item) => item.count > 0 || ['O', 'A+', 'A', 'B+', 'B', 'F'].includes(item.grade));
+
+    const markCount = gradeDistributionResult.reduce((sum, item) => sum + item.count, 0);
 
     const classCount = new Set(
       assignedSubjects.map((assignment) => `${assignment.department}-${assignment.semester}-${assignment.section}`)
@@ -126,7 +149,12 @@ const getKPIs = async (req, res, next) => {
       totalStudents,
       averageScore,
       passPercentage,
+      passCount,
       failCount,
+      pendingCount,
+      evaluatedCount,
+      markCount,
+      gradeDistribution,
       classCount,
       assignedSubjects,
       assignedStudents

@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { AlertCircle, CheckCircle, Clock, RefreshCw, Save } from 'lucide-react';
 import markService from '../../services/markService';
 import studentService from '../../services/studentService';
 import subjectService from '../../services/subjectService';
 import useDraft from '../../hooks/useDraft';
+import useAuth from '../../hooks/useAuth';
 
-const DRAFT_KEY = 'mark_entry_draft';
+const DRAFT_KEY_PREFIX = 'mark_entry_draft';
 const DEPARTMENTS = ['CS', 'CSE', 'IT', 'ECE', 'EC', 'ME', 'CE', 'EE', 'CH'];
 const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 const SECTIONS = ['A', 'B', 'C'];
@@ -34,22 +35,46 @@ const gradeColor = (grade) => {
 
 const inputClass = 'w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition bg-white';
 
+const formatDraftTime = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString([], {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 const MarkEntry = () => {
+  const { user } = useAuth();
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [marks, setMarks] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [success, setSuccess] = useState('');
   const [serverError, setServerError] = useState('');
-  const [conflict, setConflict] = useState(false);
+  const [conflict, setConflict] = useState(null);
+  const [resolvingConflict, setResolvingConflict] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState(null);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState('');
   const [filters, setFilters] = useState({ department: '', semester: '', section: '' });
+  const restoredSelectionKeyRef = useRef(null);
+  const restoredDraftDataRef = useRef(null);
+  const draftRestoreLockRef = useRef(false);
 
-  const { saveDraft, loadDraft, clearDraft } = useDraft(DRAFT_KEY);
+  const draftKey = useMemo(
+    () => `${DRAFT_KEY_PREFIX}_${user?.id || user?._id || user?.email || 'anonymous'}`,
+    [user?.id, user?._id, user?.email]
+  );
+  const { saveDraft, loadDraft, clearDraft } = useDraft(draftKey);
 
   const {
     register,
     handleSubmit,
+    getValues,
     setValue,
     watch,
     reset,
@@ -74,6 +99,30 @@ const MarkEntry = () => {
   const grade = internalMarks !== '' && externalMarks !== '' ? calculateGrade(total) : null;
   const selectedStudent = students.find((student) => student._id === selectedStudentId);
 
+  const saveCurrentDraft = useCallback((overrides = {}, nextFilters = filters) => {
+    const values = { ...getValues(), ...overrides };
+    const hasDraftableChanges =
+      values.student_id ||
+      values.subject_id ||
+      values.internal_marks !== '' ||
+      values.external_marks !== '' ||
+      nextFilters.department ||
+      nextFilters.semester ||
+      nextFilters.section;
+
+    if (!hasDraftableChanges) return null;
+
+    const savedAt = saveDraft({ ...values, filters: nextFilters });
+    if (savedAt) setDraftSavedAt(savedAt);
+    return savedAt;
+  }, [filters, getValues, saveDraft]);
+
+  const clearDraftRestoreLock = useCallback(() => {
+    restoredSelectionKeyRef.current = null;
+    restoredDraftDataRef.current = null;
+    draftRestoreLockRef.current = false;
+  }, []);
+
   useEffect(() => {
     Promise.all([
       studentService.getStudents({ limit: 1000 }).then((data) => Array.isArray(data) ? data : data.students || []),
@@ -92,16 +141,20 @@ const MarkEntry = () => {
   useEffect(() => {
     const draft = loadDraft();
     if (draft?.data) {
-      reset(draft.data);
-      if (draft.data.filters) setFilters(draft.data.filters);
-      setDraftRestored(true);
-      setTimeout(() => setDraftRestored(false), 4000);
+      setPendingDraft(draft);
+      setDraftSavedAt(draft.savedAt || '');
     }
-  }, []);
+  }, [loadDraft]);
 
   const subjectMatchesClass = (subject, studentOrFilters) => {
     const assignments = subject.classAssignments || [];
-    if (!assignments.length) return true;
+    if (!assignments.length) {
+      const assignedFacultyId = subject.assignedFaculty?._id || subject.assignedFaculty;
+      const currentUserId = user?._id || user?.id;
+      return user?.role === 'faculty'
+        ? currentUserId && assignedFacultyId && String(assignedFacultyId) === String(currentUserId)
+        : true;
+    }
     return assignments.some((assignment) =>
       assignment.department === studentOrFilters.department &&
       (assignment.semester === 'All' || Number(assignment.semester) === Number(studentOrFilters.semester)) &&
@@ -109,25 +162,31 @@ const MarkEntry = () => {
     );
   };
 
+  const getStudentSubjectId = (student) => student.subject?._id || student.subject || '';
+
   const classReady = filters.department && filters.semester && filters.section;
 
   const subjectOptions = useMemo(() => {
     if (!classReady) return [];
+    if (user?.role === 'faculty') return subjects;
     return subjects.filter((subject) => subjectMatchesClass(subject, filters));
-  }, [subjects, filters, classReady]);
+  }, [subjects, filters, classReady, user?.role, user?._id, user?.id]);
 
   const studentOptions = useMemo(() => {
     if (!classReady || !selectedSubjectId) return [];
     const selectedSubject = subjects.find((subject) => subject._id === selectedSubjectId);
-    return students.filter((student) =>
+    const classStudents = students.filter((student) =>
       student.department === filters.department &&
       Number(student.semester) === Number(filters.semester) &&
       student.section === filters.section &&
       (!selectedSubject || subjectMatchesClass(selectedSubject, student))
     );
-  }, [students, subjects, filters, classReady, selectedSubjectId]);
+    const subjectStudents = classStudents.filter((student) => String(getStudentSubjectId(student)) === String(selectedSubjectId));
+    return subjectStudents.length ? subjectStudents : classStudents;
+  }, [students, subjects, filters, classReady, selectedSubjectId, user?.role, user?._id, user?.id]);
 
   useEffect(() => {
+    if (draftRestoreLockRef.current) return;
     if (selectedSubjectId && !subjectOptions.some((subject) => subject._id === selectedSubjectId)) {
       setValue('subject_id', '');
       setValue('student_id', '');
@@ -135,6 +194,7 @@ const MarkEntry = () => {
   }, [selectedSubjectId, subjectOptions, setValue]);
 
   useEffect(() => {
+    if (draftRestoreLockRef.current) return;
     if (selectedStudentId && !studentOptions.some((student) => student._id === selectedStudentId)) {
       setValue('student_id', '');
     }
@@ -142,10 +202,17 @@ const MarkEntry = () => {
 
   const formValues = watch();
   useEffect(() => {
-    if (formValues.student_id || formValues.subject_id || filters.department || filters.semester || filters.section) {
-      saveDraft({ ...formValues, filters });
-    }
-  }, [formValues, filters]);
+    saveCurrentDraft(formValues, filters);
+  }, [formValues, filters, saveCurrentDraft]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      saveCurrentDraft();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [saveCurrentDraft]);
 
   const getExistingMark = (studentId, subjectId) => marks.find((mark) => {
     const markStudentId = mark.student_id?._id || mark.student_id;
@@ -159,6 +226,15 @@ const MarkEntry = () => {
 
   useEffect(() => {
     if (!selectedStudentId || !selectedSubjectId) return;
+    const selectedKey = `${selectedStudentId}:${selectedSubjectId}`;
+
+    if (draftRestoreLockRef.current && restoredSelectionKeyRef.current === selectedKey && restoredDraftDataRef.current) {
+      const draftData = restoredDraftDataRef.current;
+      setValue('internal_marks', draftData.internal_marks ?? '', { shouldDirty: true, shouldValidate: true });
+      setValue('external_marks', draftData.external_marks ?? '', { shouldDirty: true, shouldValidate: true });
+      setValue('version', draftData.version ?? 0, { shouldDirty: true });
+      return;
+    }
 
     if (existingMark) {
       setValue('internal_marks', existingMark.internal_marks ?? '');
@@ -175,7 +251,7 @@ const MarkEntry = () => {
   const onSubmit = async (data) => {
     setServerError('');
     setSuccess('');
-    setConflict(false);
+    setConflict(null);
 
     try {
       const payload = {
@@ -184,11 +260,30 @@ const MarkEntry = () => {
         internal_marks: Number(data.internal_marks),
         external_marks: Number(data.external_marks),
       };
+
+      if (existingMark) {
+        const currentVersion = Number(data.version ?? existingMark.version ?? 0);
+        const latestMarks = await markService.getMarkEntries();
+        const latestMark = latestMarks.find((mark) => mark._id === existingMark._id);
+
+        if (latestMark && Number(latestMark.version ?? 0) !== currentVersion) {
+          setConflict({
+            latestRecord: latestMark,
+            attemptedPayload: { ...payload, version: currentVersion },
+            manual: false,
+          });
+          setServerError('Conflict: This mark entry was modified by another user.');
+          return;
+        }
+      }
+
       const savedMark = existingMark
         ? await markService.updateMarkEntry(existingMark._id, { ...payload, version: data.version })
         : await markService.createMarkEntry(payload);
 
       clearDraft();
+      clearDraftRestoreLock();
+      setDraftSavedAt('');
       setMarks((prev) => {
         if (existingMark) {
           return prev.map((mark) => mark._id === savedMark._id ? savedMark : mark);
@@ -202,8 +297,12 @@ const MarkEntry = () => {
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       if (err?.response?.status === 409) {
-        setConflict(true);
-        setServerError('Conflict: This mark entry was modified by another user. Please refresh and re-enter.');
+        setConflict({
+          latestRecord: err.response.data.latestRecord,
+          attemptedPayload: { ...payload, version: data.version },
+          manual: false,
+        });
+        setServerError('Conflict: This mark entry was modified by another user.');
       } else if (err?.response?.status === 400 && err?.response?.data?.message?.includes('already exists')) {
         setServerError('A mark entry already exists. Select the student again to load it for editing.');
       } else {
@@ -215,18 +314,202 @@ const MarkEntry = () => {
   const clearForm = () => {
     reset({ student_id: '', subject_id: '', internal_marks: '', external_marks: '', version: 0 });
     setFilters({ department: '', semester: '', section: '' });
+    setConflict(null);
+    setPendingDraft(null);
+    clearDraftRestoreLock();
+    setDraftSavedAt('');
     clearDraft();
+  };
+
+  const restorePendingDraft = () => {
+    if (!pendingDraft?.data) return;
+
+    const draftData = pendingDraft.data;
+    const nextFilters = draftData.filters || filters;
+    const nextValues = {
+      student_id: draftData.student_id || '',
+      subject_id: draftData.subject_id || '',
+      internal_marks: draftData.internal_marks ?? '',
+      external_marks: draftData.external_marks ?? '',
+      version: draftData.version ?? 0,
+    };
+
+    if (nextValues.student_id && nextValues.subject_id) {
+      restoredSelectionKeyRef.current = `${nextValues.student_id}:${nextValues.subject_id}`;
+      restoredDraftDataRef.current = nextValues;
+      draftRestoreLockRef.current = true;
+    }
+
+    setFilters(nextFilters);
+    reset(nextValues);
+    setValue('subject_id', nextValues.subject_id, { shouldDirty: true, shouldValidate: true });
+    setValue('student_id', nextValues.student_id, { shouldDirty: true, shouldValidate: true });
+    setValue('internal_marks', nextValues.internal_marks, { shouldDirty: true, shouldValidate: true });
+    setValue('external_marks', nextValues.external_marks, { shouldDirty: true, shouldValidate: true });
+    setValue('version', nextValues.version, { shouldDirty: true });
+    saveCurrentDraft(nextValues, nextFilters);
+    setDraftSavedAt(pendingDraft.savedAt || '');
+    setPendingDraft(null);
+    setDraftRestored(true);
+    setSuccess('Unsaved draft restored. Review the marks and click Save/Update.');
+    setTimeout(() => {
+      setDraftRestored(false);
+      setSuccess('');
+    }, 5000);
+  };
+
+  const discardPendingDraft = () => {
+    setPendingDraft(null);
+    setDraftRestored(false);
+    setDraftSavedAt('');
+    clearDraftRestoreLock();
+    clearDraft();
+    setSuccess('Draft discarded.');
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
+  const applySavedMark = (savedMark) => {
+    clearDraftRestoreLock();
+    setMarks((prev) => {
+      const exists = prev.some((mark) => mark._id === savedMark._id);
+      return exists
+        ? prev.map((mark) => mark._id === savedMark._id ? savedMark : mark)
+        : [savedMark, ...prev];
+    });
+    setValue('internal_marks', savedMark.internal_marks ?? '');
+    setValue('external_marks', savedMark.external_marks ?? '');
+    setValue('version', savedMark.version ?? 0);
+  };
+
+  const acceptLatest = () => {
+    if (!conflict?.latestRecord) return;
+    applySavedMark(conflict.latestRecord);
+    clearDraft();
+    setDraftSavedAt('');
+    setConflict(null);
+    setServerError('');
+    setSuccess('Latest version loaded into the form.');
+  };
+
+  const overwriteMine = async () => {
+    if (!conflict?.latestRecord || !conflict?.attemptedPayload) return;
+    setResolvingConflict(true);
+    setServerError('');
+    try {
+      const savedMark = await markService.updateMarkEntry(conflict.latestRecord._id, {
+        ...conflict.attemptedPayload,
+        version: conflict.latestRecord.version,
+        force: true,
+      });
+      applySavedMark(savedMark);
+      clearDraft();
+      setDraftSavedAt('');
+      setConflict(null);
+      setSuccess('Your marks overwrote the latest version.');
+    } catch (err) {
+      setServerError(err?.response?.data?.message || 'Failed to overwrite latest marks.');
+    } finally {
+      setResolvingConflict(false);
+    }
+  };
+
+  const startManualMerge = () => {
+    if (!conflict?.latestRecord) return;
+    setValue('version', conflict.latestRecord.version ?? 0, { shouldDirty: true });
+    setConflict((prev) => prev ? { ...prev, manual: true } : prev);
+    setServerError('Manual merge mode: choose latest or mine for each mark, then click Update.');
+  };
+
+  const useMergeValue = (field, value) => {
+    if (!conflict?.latestRecord) return;
+    setValue(field, value ?? '', { shouldDirty: true, shouldValidate: true });
+    setValue('version', conflict.latestRecord.version ?? 0, { shouldDirty: true });
+    setConflict((prev) => prev ? { ...prev, manual: true } : prev);
+    setServerError('Manual merge mode: chosen value applied to the form. Review and click Update.');
+  };
+
+  const useBothLatestForMerge = () => {
+    if (!conflict?.latestRecord) return;
+    useMergeValue('internal_marks', conflict.latestRecord.internal_marks);
+    useMergeValue('external_marks', conflict.latestRecord.external_marks);
+  };
+
+  const useBothMineForMerge = () => {
+    if (!conflict?.attemptedPayload) return;
+    useMergeValue('internal_marks', conflict.attemptedPayload.internal_marks);
+    useMergeValue('external_marks', conflict.attemptedPayload.external_marks);
   };
 
   return (
     <div className="w-full space-y-4">
 
-      {draftRestored && (
-        <div className="flex items-center gap-2 p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
-          <Clock className="w-4 h-4 flex-shrink-0" />
-          Draft restored from your last session.
+      {pendingDraft?.data && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <Clock className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-700" />
+              <div className="min-w-0">
+                <h3 className="font-bold text-amber-900">Unsaved draft found. Restore draft?</h3>
+                <p className="mt-1 text-sm text-amber-700">
+                  {pendingDraft.data.filters?.department || 'Class'} / Semester {pendingDraft.data.filters?.semester || '-'} / Section {pendingDraft.data.filters?.section || '-'}
+                  {pendingDraft.savedAt ? ` - saved ${formatDraftTime(pendingDraft.savedAt)}` : ''}
+                </p>
+                <p className="mt-1 text-xs text-amber-700">
+                  Internal: {pendingDraft.data.internal_marks || '-'} / External: {pendingDraft.data.external_marks || '-'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={restorePendingDraft}
+                className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-amber-700"
+              >
+                Restore Draft
+              </button>
+              <button
+                type="button"
+                onClick={discardPendingDraft}
+                className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {draftRestored && !pendingDraft && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+          <Clock className="w-4 h-4 flex-shrink-0" />
+          <span className="font-medium">
+            Draft restored{draftSavedAt ? ` from ${formatDraftTime(draftSavedAt)}` : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={clearForm}
+            className="ml-auto rounded-lg bg-white px-3 py-1 text-xs font-bold text-amber-700 shadow-sm hover:bg-amber-100"
+          >
+            Clear Draft
+          </button>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-indigo-700">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-bold text-indigo-900">Local draft recovery</p>
+          {draftSavedAt && (
+            <span className="rounded-lg bg-white px-2.5 py-1 font-semibold text-indigo-700">
+              Autosaved {formatDraftTime(draftSavedAt)}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 leading-relaxed">
+          Unsaved marks are stored in this browser for the current logged-in user. After refresh, the page asks whether to restore the draft.
+          Drafts are cleared after Save or Clear, and cannot be restored from another browser/device, private mode,
+          cleared browser storage, or if the student/subject record was changed or removed.
+        </p>
+      </div>
 
       {success && (
         <div className="flex items-center gap-2 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-sm">
@@ -239,14 +522,133 @@ const MarkEntry = () => {
         <div className="flex items-center gap-2 p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {serverError}
-          {conflict && (
-            <button
-              onClick={() => window.location.reload()}
-              className="ml-auto flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-800 underline"
-            >
-              <RefreshCw className="w-3 h-3" /> Refresh
-            </button>
+        </div>
+      )}
+
+      {conflict?.latestRecord && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 shadow-lg ring-4 ring-amber-100">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-amber-900">Version conflict detected</h3>
+              <p className="mt-0.5 text-xs text-amber-700">
+                Another user saved this mark after you opened it. Choose how to resolve it.
+              </p>
+            </div>
+            {conflict.manual && (
+              <span className="rounded-lg bg-white px-3 py-1 text-xs font-bold text-amber-700">
+                Manual merge mode
+              </span>
+            )}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-amber-100 bg-white p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Latest saved</p>
+              <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <span>I: {conflict.latestRecord.internal_marks}</span>
+                <span>E: {conflict.latestRecord.external_marks}</span>
+                <span>Total: {conflict.latestRecord.total}</span>
+                <span className={`rounded-lg px-2 py-0.5 text-xs ${gradeColor(conflict.latestRecord.grade)}`}>
+                  {conflict.latestRecord.grade}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                Version {conflict.latestRecord.version}
+                {conflict.latestRecord.updated_by?.name ? ` by ${conflict.latestRecord.updated_by.name}` : ''}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-white p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Your submitted marks</p>
+              <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <span>I: {conflict.attemptedPayload.internal_marks}</span>
+                <span>E: {conflict.attemptedPayload.external_marks}</span>
+                <span>Total: {Number(conflict.attemptedPayload.internal_marks) + Number(conflict.attemptedPayload.external_marks)}</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">Submitted from version {conflict.attemptedPayload.version}</p>
+            </div>
+          </div>
+
+          {conflict.manual && (
+            <div className="mt-4 rounded-xl border border-amber-100 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Manual merge selector</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Pick values and they will be applied to the form below.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={useBothLatestForMerge}
+                    className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-200"
+                  >
+                    Use Latest Both
+                  </button>
+                  <button
+                    type="button"
+                    onClick={useBothMineForMerge}
+                    className="rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    Use Mine Both
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {[
+                  ['Internal', 'internal_marks'],
+                  ['External', 'external_marks'],
+                ].map(([label, field]) => (
+                  <div key={field} className="rounded-lg border border-slate-100 p-3">
+                    <p className="text-xs font-bold text-slate-700">{label} Marks</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => useMergeValue(field, conflict.latestRecord[field])}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        Latest: {conflict.latestRecord[field]}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => useMergeValue(field, conflict.attemptedPayload[field])}
+                        className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
+                      >
+                        Mine: {conflict.attemptedPayload[field]}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
+
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={acceptLatest}
+              disabled={resolvingConflict}
+              className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              Accept Latest
+            </button>
+            <button
+              type="button"
+              onClick={overwriteMine}
+              disabled={resolvingConflict}
+              className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-60"
+            >
+              {resolvingConflict ? 'Overwriting...' : 'Overwrite Mine'}
+            </button>
+            <button
+              type="button"
+              onClick={startManualMerge}
+              disabled={resolvingConflict}
+              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-60"
+            >
+              Manual Merge
+            </button>
+          </div>
         </div>
       )}
 
@@ -280,9 +682,15 @@ const MarkEntry = () => {
                 disabled={loadingData}
                 value={filters.department}
                 onChange={(event) => {
-                  setFilters((prev) => ({ ...prev, department: event.target.value }));
+                  clearDraftRestoreLock();
+                  const nextFilters = { ...filters, department: event.target.value };
+                  setFilters(nextFilters);
                   setValue('subject_id', '');
                   setValue('student_id', '');
+                  setValue('internal_marks', '');
+                  setValue('external_marks', '');
+                  setValue('version', 0);
+                  saveCurrentDraft({ subject_id: '', student_id: '', internal_marks: '', external_marks: '', version: 0 }, nextFilters);
                 }}
                 className={inputClass}
               >
@@ -296,9 +704,15 @@ const MarkEntry = () => {
                 disabled={loadingData}
                 value={filters.semester}
                 onChange={(event) => {
-                  setFilters((prev) => ({ ...prev, semester: event.target.value }));
+                  clearDraftRestoreLock();
+                  const nextFilters = { ...filters, semester: event.target.value };
+                  setFilters(nextFilters);
                   setValue('subject_id', '');
                   setValue('student_id', '');
+                  setValue('internal_marks', '');
+                  setValue('external_marks', '');
+                  setValue('version', 0);
+                  saveCurrentDraft({ subject_id: '', student_id: '', internal_marks: '', external_marks: '', version: 0 }, nextFilters);
                 }}
                 className={inputClass}
               >
@@ -312,9 +726,15 @@ const MarkEntry = () => {
                 disabled={loadingData}
                 value={filters.section}
                 onChange={(event) => {
-                  setFilters((prev) => ({ ...prev, section: event.target.value }));
+                  clearDraftRestoreLock();
+                  const nextFilters = { ...filters, section: event.target.value };
+                  setFilters(nextFilters);
                   setValue('subject_id', '');
                   setValue('student_id', '');
+                  setValue('internal_marks', '');
+                  setValue('external_marks', '');
+                  setValue('version', 0);
+                  saveCurrentDraft({ subject_id: '', student_id: '', internal_marks: '', external_marks: '', version: 0 }, nextFilters);
                 }}
                 className={inputClass}
               >
@@ -330,7 +750,23 @@ const MarkEntry = () => {
               id="mark-subject-select"
               disabled={loadingData || !classReady}
               className={`${inputClass} ${errors.subject_id ? 'border-rose-400' : ''}`}
-              {...register('subject_id', { required: 'Select a subject' })}
+              {...register('subject_id', {
+                required: 'Select a subject',
+                onChange: (event) => {
+                  clearDraftRestoreLock();
+                  setValue('student_id', '');
+                  setValue('internal_marks', '');
+                  setValue('external_marks', '');
+                  setValue('version', 0);
+                  saveCurrentDraft({
+                    subject_id: event.target.value,
+                    student_id: '',
+                    internal_marks: '',
+                    external_marks: '',
+                    version: 0,
+                  });
+                }
+              })}
             >
               <option value="">-- Select Subject --</option>
               {subjectOptions.map((subject) => (
@@ -346,6 +782,7 @@ const MarkEntry = () => {
         </div>
 
         <input type="hidden" {...register('student_id', { required: 'Select a student' })} />
+        <input type="hidden" {...register('version')} />
 
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
@@ -415,7 +852,20 @@ const MarkEntry = () => {
                             <button
                               type="button"
                               onClick={() => {
+                                clearDraftRestoreLock();
+                                const nextInternalMarks = markForStudent?.internal_marks ?? '';
+                                const nextExternalMarks = markForStudent?.external_marks ?? '';
+                                const nextVersion = markForStudent?.version ?? 0;
                                 setValue('student_id', student._id, { shouldValidate: true });
+                                setValue('internal_marks', nextInternalMarks);
+                                setValue('external_marks', nextExternalMarks);
+                                setValue('version', nextVersion);
+                                saveCurrentDraft({
+                                  student_id: student._id,
+                                  internal_marks: nextInternalMarks,
+                                  external_marks: nextExternalMarks,
+                                  version: nextVersion,
+                                });
                               }}
                               className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
                                 active
@@ -495,6 +945,10 @@ const MarkEntry = () => {
                     required: 'Required',
                     min: { value: 0, message: 'Min 0' },
                     max: { value: 50, message: 'Max 50' },
+                    onChange: (event) => {
+                      clearDraftRestoreLock();
+                      saveCurrentDraft({ internal_marks: event.target.value });
+                    },
                   })}
                 />
                 {errors.internal_marks && <p className="mt-1 text-xs text-rose-500">{errors.internal_marks.message}</p>}
@@ -517,6 +971,10 @@ const MarkEntry = () => {
                     required: 'Required',
                     min: { value: 0, message: 'Min 0' },
                     max: { value: 50, message: 'Max 50' },
+                    onChange: (event) => {
+                      clearDraftRestoreLock();
+                      saveCurrentDraft({ external_marks: event.target.value });
+                    },
                   })}
                 />
                 {errors.external_marks && <p className="mt-1 text-xs text-rose-500">{errors.external_marks.message}</p>}

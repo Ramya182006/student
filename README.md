@@ -13,6 +13,25 @@ Bulk CSV Import
 Optimistic Concurrency Control
 Local Draft Recovery
 Structured Logging and Metrics
+
+Local Draft Recovery
+The Enter Marks page autosaves unsaved mark entry changes to browser localStorage using a per-user draft key. If the page is refreshed, it shows an "Unsaved draft found. Restore draft?" prompt. Restore Draft reloads the selected department, semester, section, subject, student, marks, and version into the form.
+
+Limitations:
+- Drafts are local to the same browser and device.
+- Drafts are separated by logged-in user, but they are not a replacement for saved database records.
+- Drafts are cleared after Save or Clear.
+- Drafts cannot be restored after browser storage is cleared, in some private browsing sessions, on another device/browser, or if the underlying student/subject record was removed or changed.
+
+Search and Filtering Approach
+Search is implemented with a normalized, case-insensitive text match. Student search checks name, roll number, email, phone, and guardian fields where available. Mark entry search checks student name, roll number, subject name, subject code, faculty name, and published/draft state. Server-side student filters support department, semester, section, and pass/fail status. Faculty users receive only their scoped students and marks before filtering, so search results never expose unassigned student records.
+
+Test Artifacts
+- `samples/sample_marks_import_50_rows.csv` demonstrates the minimum 50-row marks import format.
+- `samples/sample_account_import.csv` demonstrates admin-side student/faculty account import.
+- `docs/ui-unauthorized-faculty-edit-test.md` documents the UI verification for an unauthorized faculty edit attempt.
+- API tests cover authentication, role access, CSV import idempotency, faculty scoping, and optimistic concurrency.
+
 Tech Stack
 Frontend: React.js, HTML, CSS, JavaScript
 Backend: Node.js, Express.js

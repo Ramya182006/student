@@ -1,47 +1,89 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Users, BookOpen, ClipboardList, TrendingUp,
-  UserX, UserCheck, Award, Plus, Upload, BarChart2, RefreshCcw, Layers, Megaphone, FileText, CalendarCheck, Save, Trash2
+  Award,
+  BarChart2,
+  BookOpen,
+  CalendarCheck,
+  ClipboardList,
+  FileText,
+  Layers,
+  Megaphone,
+  Plus,
+  RefreshCcw,
+  Save,
+  TrendingUp,
+  UserCheck,
+  UserX,
+  Users,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  Bar,
+  BarChart,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import KPIBox from '../components/KPIBox';
 import { Skeleton } from '../components/Loader';
 import dashboardService from '../services/dashboardService';
 import subjectService from '../services/subjectService';
 import userService from '../services/userService';
 import useAuth from '../hooks/useAuth';
 
-const GRADE_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
+const GRADE_COLORS = {
+  O: '#4f46e5',
+  'A+': '#7c3aed',
+  A: '#0891b2',
+  'B+': '#059669',
+  B: '#f59e0b',
+  C: '#64748b',
+  F: '#e11d48',
+};
 const DEPARTMENTS = ['CS', 'CSE', 'IT', 'ECE', 'EC', 'ME', 'CE', 'EE', 'CH'];
 const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 const SECTIONS = ['A', 'B', 'C'];
+
+const StatCard = ({ title, value, icon: Icon, tone, caption }) => (
+  <div className="flex min-h-[74px] items-center gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+      <Icon className="h-5 w-5 text-white" />
+    </div>
+    <div className="min-w-0">
+      <p className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-400">{title}</p>
+      <p className="mt-0.5 text-2xl font-bold leading-none text-slate-900">{value}</p>
+      {caption && <p className="mt-1 truncate text-[11px] font-medium text-slate-400">{caption}</p>}
+    </div>
+  </div>
+);
+
+const EmptyPanel = ({ text }) => (
+  <div className="flex h-full min-h-[96px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 text-sm font-medium text-slate-400">
+    {text}
+  </div>
+);
 
 const Dashboard = () => {
   const { user } = useAuth();
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedGrade, setSelectedGrade] = useState('All');
   const [range, setRange] = useState('Semester');
+  const [selectedGrade, setSelectedGrade] = useState('All');
   const [subjects, setSubjects] = useState([]);
   const [faculty, setFaculty] = useState([]);
   const [assigning, setAssigning] = useState(false);
   const [assignToast, setAssignToast] = useState('');
-  const [facultyStudentFilters, setFacultyStudentFilters] = useState({
-    department: '',
-    semester: '',
-    section: '',
-    subject: '',
-  });
-  const [bulkForm, setBulkForm] = useState({
-    department: 'CSE',
+  const [quickAssign, setQuickAssign] = useState({
+    department: 'CS',
     semester: '1',
     section: 'A',
-    rows: [{ subject: '', faculty: '' }],
+    subject: '',
+    faculty: '',
   });
 
   const loadDashboard = () => {
@@ -71,45 +113,81 @@ const Dashboard = () => {
       });
   }, [user?.role]);
 
+  const gradeData = useMemo(() => {
+    const fallback = ['O', 'A+', 'A', 'B+', 'B', 'F'].map((grade) => ({ grade, count: 0 }));
+    const source = Array.isArray(kpis?.gradeDistribution) ? kpis.gradeDistribution : fallback;
+    const scale = { Week: 0.35, Month: 0.7, Semester: 1 }[range] || 1;
+    return source
+      .map((item) => ({ ...item, count: Math.round((item.count || 0) * scale) }))
+      .filter((item) => selectedGrade === 'All' || item.grade === selectedGrade);
+  }, [kpis?.gradeDistribution, range, selectedGrade]);
+
+  const gradeTotal = gradeData.reduce((sum, item) => sum + item.count, 0);
+  const passCount = kpis?.passCount || 0;
+  const failCount = kpis?.failCount || 0;
+  const pieData = [
+    { name: 'Pass', value: passCount },
+    { name: 'Fail', value: failCount },
+  ];
+
+  const stats = {
+    admin: [
+      { title: 'Students', value: kpis?.totalStudents ?? '-', icon: Users, tone: 'bg-indigo-600', caption: `${kpis?.pendingCount || 0} pending marks` },
+      { title: 'Avg Score', value: kpis?.averageScore ?? '-', icon: TrendingUp, tone: 'bg-emerald-600', caption: `${kpis?.markCount || 0} mark entries` },
+      { title: 'Pass Rate', value: `${kpis?.passPercentage ?? 0}%`, icon: Award, tone: 'bg-violet-600', caption: `${passCount} passed` },
+      { title: 'Failed', value: failCount, icon: UserX, tone: 'bg-rose-600', caption: 'distinct students' },
+    ],
+    faculty: [
+      { title: 'My Students', value: kpis?.totalStudents ?? '-', icon: Users, tone: 'bg-indigo-600', caption: `${kpis?.classCount || 0} classes` },
+      { title: 'Avg Score', value: kpis?.averageScore ?? '-', icon: TrendingUp, tone: 'bg-emerald-600', caption: `${kpis?.markCount || 0} mark entries` },
+      { title: 'Pass Rate', value: `${kpis?.passPercentage ?? 0}%`, icon: Award, tone: 'bg-violet-600', caption: `${passCount} passed` },
+      { title: 'Failed', value: failCount, icon: UserX, tone: 'bg-rose-600', caption: `${kpis?.pendingCount || 0} pending` },
+    ],
+    student: [
+      { title: 'My Profile', value: kpis?.totalStudents ? 'Active' : 'Missing', icon: UserCheck, tone: 'bg-indigo-600', caption: `${kpis?.classCount || 0} classes` },
+      { title: 'Avg Score', value: kpis?.averageScore ?? '-', icon: TrendingUp, tone: 'bg-emerald-600', caption: `${kpis?.markCount || 0} subjects marked` },
+      { title: 'Pass Rate', value: `${kpis?.passPercentage ?? 0}%`, icon: Award, tone: 'bg-violet-600', caption: `${passCount} passed subjects` },
+      { title: 'Failed', value: failCount, icon: UserX, tone: 'bg-rose-600', caption: `${kpis?.pendingCount || 0} pending` },
+    ],
+  }[user?.role] || [];
+
+  const quickActions = [
+    { label: 'Add Student', to: '/students/add', icon: Plus, color: 'bg-indigo-600 hover:bg-indigo-700', roles: ['admin'] },
+    { label: 'Students', to: '/students', icon: Users, color: 'bg-sky-600 hover:bg-sky-700', roles: ['admin', 'faculty'] },
+    { label: 'Enter Marks', to: '/marks/entry', icon: ClipboardList, color: 'bg-emerald-600 hover:bg-emerald-700', roles: ['faculty'] },
+    { label: 'Reports', to: '/reports', icon: BarChart2, color: 'bg-violet-600 hover:bg-violet-700', roles: ['admin', 'faculty'] },
+    { label: 'Report Card', to: '/reports/my-report', icon: FileText, color: 'bg-violet-600 hover:bg-violet-700', roles: ['student'] },
+  ].filter((item) => item.roles.includes(user?.role));
+
+  const assignmentGroups = (kpis?.assignedSubjects || []).reduce((acc, assignment) => {
+    const key = `${assignment.department} / Sem ${assignment.semester} / ${assignment.section}`;
+    acc[key] = acc[key] || [];
+    acc[key].push(assignment);
+    return acc;
+  }, {});
+  const assignmentEntries = Object.entries(assignmentGroups).slice(0, 3);
+  const assignedStudents = (kpis?.assignedStudents || []).slice(0, 5);
+
   const showAssignToast = (message) => {
     setAssignToast(message);
-    setTimeout(() => setAssignToast(''), 3000);
+    setTimeout(() => setAssignToast(''), 2500);
   };
 
-  const updateBulkRow = (index, key, value) => {
-    setBulkForm((prev) => ({
-      ...prev,
-      rows: prev.rows.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row),
-    }));
-  };
-
-  const addBulkRow = () => {
-    setBulkForm((prev) => ({ ...prev, rows: [...prev.rows, { subject: '', faculty: '' }] }));
-  };
-
-  const removeBulkRow = (index) => {
-    setBulkForm((prev) => ({
-      ...prev,
-      rows: prev.rows.length === 1 ? prev.rows : prev.rows.filter((_, rowIndex) => rowIndex !== index),
-    }));
-  };
-
-  const saveBulkAssignment = async () => {
-    const assignments = bulkForm.rows.filter((row) => row.subject && row.faculty);
-    if (!bulkForm.department || !bulkForm.semester || !bulkForm.section || assignments.length === 0) {
-      showAssignToast('Select class, subject, and faculty before saving.');
+  const saveQuickAssignment = async () => {
+    if (!quickAssign.subject || !quickAssign.faculty) {
+      showAssignToast('Select subject and faculty.');
       return;
     }
 
     setAssigning(true);
     try {
       await subjectService.bulkAssign({
-        department: bulkForm.department,
-        semester: Number(bulkForm.semester),
-        section: bulkForm.section,
-        assignments,
+        department: quickAssign.department,
+        semester: Number(quickAssign.semester),
+        section: quickAssign.section,
+        assignments: [{ subject: quickAssign.subject, faculty: quickAssign.faculty }],
       });
-      showAssignToast('Assignment saved. Faculty dashboard will show only these class students.');
+      showAssignToast('Assignment saved.');
       loadDashboard();
     } catch (err) {
       showAssignToast(err?.response?.data?.message || 'Failed to save assignment.');
@@ -118,104 +196,31 @@ const Dashboard = () => {
     }
   };
 
-  // Build grade distribution chart data from KPIs (mocked structure as backend returns summary)
-  const gradeData = [
-    { grade: 'O', count: 12 },
-    { grade: 'A+', count: 25 },
-    { grade: 'A', count: 30 },
-    { grade: 'B+', count: 20 },
-    { grade: 'B', count: 8 },
-    { grade: 'F', count: kpis?.failCount ?? 5 },
-  ];
-  const rangeScale = { Week: 0.35, Month: 0.7, Semester: 1 };
-  const visibleGradeData = gradeData
-    .map((item) => ({ ...item, count: Math.max(0, Math.round(item.count * rangeScale[range])) }))
-    .filter((item) => selectedGrade === 'All' || item.grade === selectedGrade);
-  const selectedTotal = visibleGradeData.reduce((sum, item) => sum + item.count, 0);
-
-  const pieData = [
-    { name: 'Pass', value: kpis ? Math.max(0, kpis.totalStudents - kpis.failCount) : 0 },
-    { name: 'Fail', value: kpis?.failCount ?? 0 },
-  ];
-  const safePassPercentage = kpis?.passPercentage !== undefined
-    ? Math.max(0, Math.min(100, Number(kpis.passPercentage)))
-    : null;
-
-  const quickActions = [
-    { label: 'Add Student', to: '/students/add', icon: Plus, color: 'bg-indigo-600 hover:bg-indigo-700', roles: ['admin'] },
-    { label: 'Bulk Assign', to: '/subjects', icon: Layers, color: 'bg-cyan-600 hover:bg-cyan-700', roles: ['admin'] },
-    { label: 'Enter Marks', to: '/marks/entry', icon: ClipboardList, color: 'bg-emerald-600 hover:bg-emerald-700', roles: ['faculty'] },
-    { label: 'View Reports', to: '/reports', icon: BarChart2, color: 'bg-violet-600 hover:bg-violet-700', roles: ['admin', 'faculty'] },
-  ].filter(a => !a.roles || a.roles.includes(user?.role));
-
-  const assignmentGroups = (kpis?.assignedSubjects || []).reduce((acc, assignment) => {
-    const key = `${assignment.department}-Semester ${assignment.semester}-${assignment.section}`;
-    acc[key] = acc[key] || [];
-    acc[key].push(assignment);
-    return acc;
-  }, {});
-
-  const facultySubjectOptions = (kpis?.assignedSubjects || []).filter((assignment, index, assignments) => {
-    const subjectId = assignment.subject?._id || assignment.subject;
-    return subjectId && assignments.findIndex((item) => (item.subject?._id || item.subject) === subjectId) === index;
-  });
-
-  const filteredFacultyStudents = (kpis?.assignedStudents || []).filter((student) => {
-    const matchesClass =
-      (!facultyStudentFilters.department || student.department === facultyStudentFilters.department) &&
-      (!facultyStudentFilters.semester || Number(student.semester) === Number(facultyStudentFilters.semester)) &&
-      (!facultyStudentFilters.section || student.section === facultyStudentFilters.section);
-
-    if (!matchesClass) return false;
-    if (!facultyStudentFilters.subject) return true;
-
-    return (kpis?.assignedSubjects || []).some((assignment) => {
-      const subjectId = assignment.subject?._id || assignment.subject;
-      return (
-        subjectId === facultyStudentFilters.subject &&
-        assignment.department === student.department &&
-        (assignment.semester === 'All' || Number(assignment.semester) === Number(student.semester)) &&
-        assignment.section === student.section
-      );
-    });
-  });
-
-  const filteredStudentGroups = filteredFacultyStudents.reduce((acc, student) => {
-    const key = `${student.department}-Semester ${student.semester}-${student.section || 'No Section'}`;
-    acc[key] = acc[key] || [];
-    acc[key].push(student);
-    return acc;
-  }, {});
-
   const roleTools = {
     admin: [
-      { label: 'Manage Departments', icon: Layers },
-      { label: 'Create Semesters & Classes', icon: BookOpen },
-      { label: 'Generate Student Credentials', icon: Users },
-      { label: 'Bulk Assign Faculty', icon: UserCheck },
+      { label: 'Subjects', icon: BookOpen, to: '/subjects' },
+      { label: 'Faculty', icon: UserCheck, to: '/faculty' },
+      { label: 'Bulk Import', icon: Layers, to: '/marks/import' },
     ],
     faculty: [
-      { label: 'Mark Attendance', icon: CalendarCheck },
-      { label: 'Enter Marks', icon: ClipboardList },
-      { label: 'Upload Notes', icon: FileText },
-      { label: 'Class Analytics', icon: TrendingUp },
+      { label: 'Attendance', icon: CalendarCheck, to: '/students' },
+      { label: 'Mark List', icon: ClipboardList, to: '/marks' },
+      { label: 'Reports', icon: TrendingUp, to: '/reports' },
     ],
     student: [
-      { label: 'View Subjects & Faculty', icon: BookOpen },
-      { label: 'View Attendance', icon: CalendarCheck },
-      { label: 'Download Notes', icon: FileText },
-      { label: 'Announcements', icon: Megaphone },
+      { label: 'Subjects', icon: BookOpen, to: '/reports/my-report' },
+      { label: 'Attendance', icon: CalendarCheck, to: '/profile' },
+      { label: 'Announcements', icon: Megaphone, to: '/profile' },
     ],
-  };
+  }[user?.role] || [];
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      {/* Page header */}
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="h-[calc(100vh-154px)] max-w-7xl overflow-hidden">
+      <div className="flex h-full flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Dashboard</h2>
-            <p className="mt-0.5 text-sm text-slate-500">
+            <h2 className="text-2xl font-bold leading-tight text-slate-900">Dashboard</h2>
+            <p className="text-sm text-slate-500">
               Welcome back, <span className="font-semibold text-indigo-600">{user?.name}</span>
             </p>
           </div>
@@ -234,424 +239,178 @@ const Dashboard = () => {
             ))}
           </div>
         </div>
-      </div>
 
-      {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm">{error}</div>
-      )}
+        {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)
-        ) : (
-          <>
-            <KPIBox
-              title="Total Students"
-              value={kpis?.totalStudents ?? '—'}
-              icon={Users}
-              gradient="bg-gradient-to-br from-indigo-500 to-indigo-700"
-            />
-            <KPIBox
-              title="Average Score"
-              value={kpis?.averageScore !== undefined ? `${kpis.averageScore}` : '—'}
-              icon={TrendingUp}
-              gradient="bg-gradient-to-br from-emerald-500 to-teal-600"
-            />
-            <KPIBox
-              title="Pass Rate"
-              value={safePassPercentage !== null ? `${safePassPercentage}%` : '—'}
-              icon={Award}
-              gradient="bg-gradient-to-br from-violet-500 to-purple-700"
-            />
-            <KPIBox
-              title="Students Failed"
-              value={kpis?.failCount ?? '—'}
-              icon={UserX}
-              gradient="bg-gradient-to-br from-rose-500 to-rose-700"
-            />
-          </>
-        )}
-      </div>
+        <div className="grid grid-cols-4 gap-3">
+          {loading
+            ? Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-[74px]" />)
+            : stats.map((stat) => <StatCard key={stat.title} {...stat} />)}
+        </div>
 
-      {/* Charts */}
-      {!loading && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {/* Grade Distribution Bar Chart */}
-          <div className="lg:col-span-2 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-slate-800">Grade Distribution</h3>
-                <p className="mt-0.5 text-xs text-slate-400">
-                  {selectedGrade === 'All' ? `${selectedTotal} records shown` : `${selectedGrade} grade selected`}
-                </p>
+        {!loading && (
+          <div className="grid min-h-0 flex-1 grid-cols-12 gap-3">
+            <section className="col-span-8 flex min-h-0 flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Grade Distribution</h3>
+                  <p className="text-xs text-slate-400">{gradeTotal} records shown</p>
+                </div>
+                <div className="flex gap-1">
+                  {['All', ...(kpis?.gradeDistribution || []).map((item) => item.grade)].map((grade) => (
+                    <button
+                      key={grade}
+                      type="button"
+                      onClick={() => setSelectedGrade(grade)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                        selectedGrade === grade ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      {grade}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {['All', ...gradeData.map((g) => g.grade)].map((grade) => (
-                  <button
-                    key={grade}
-                    type="button"
-                    onClick={() => setSelectedGrade(grade)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      selectedGrade === grade ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                    }`}
-                  >
-                    {grade}
-                  </button>
+              <div className="min-h-0 flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={gradeData} barCategoryGap="35%">
+                    <XAxis dataKey="grade" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} cursor={{ fill: '#f8fafc' }} />
+                    <Bar dataKey="count" radius={[6, 6, 0, 0]} onClick={(item) => setSelectedGrade(item.grade)}>
+                      {gradeData.map((item) => <Cell key={item.grade} fill={GRADE_COLORS[item.grade] || '#64748b'} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {selectedGrade !== 'All' && (
+                <button type="button" onClick={() => setSelectedGrade('All')} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600">
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  Reset
+                </button>
+              )}
+            </section>
+
+            <section className="col-span-4 flex min-h-0 flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800">Pass vs Fail</h3>
+              <div className="min-h-0 flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={pieData} cx="50%" cy="50%" innerRadius="52%" outerRadius="78%" paddingAngle={3} dataKey="value">
+                      <Cell fill="#10b981" />
+                      <Cell fill="#ef4444" />
+                    </Pie>
+                    <Legend iconType="circle" iconSize={9} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="col-span-4 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              <h3 className="mb-3 text-sm font-bold text-slate-800">Quick Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {quickActions.map(({ label, to, icon: Icon, color }) => (
+                  <Link key={label} to={to} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm ${color}`}>
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </Link>
                 ))}
               </div>
-            </div>
-            <ResponsiveContainer width="100%" height={190}>
-              <BarChart data={visibleGradeData} barCategoryGap="30%">
-                <XAxis dataKey="grade" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                  cursor={{ fill: '#f1f5f9' }}
-                />
-                <Bar dataKey="count" radius={[6, 6, 0, 0]} onClick={(item) => setSelectedGrade(item.grade)}>
-                  {visibleGradeData.map((_, i) => (
-                    <Cell key={i} fill={GRADE_COLORS[i % GRADE_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            {selectedGrade !== 'All' && (
-              <button
-                type="button"
-                onClick={() => setSelectedGrade('All')}
-                className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
-              >
-                <RefreshCcw className="w-3.5 h-3.5" />
-                Reset chart
-              </button>
-            )}
-          </div>
-
-          {/* Pass/Fail Pie Chart */}
-          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-sm font-bold text-slate-800">Pass vs Fail</h3>
-            <ResponsiveContainer width="100%" height={190}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={48}
-                  outerRadius={74}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  <Cell fill="#10b981" />
-                  <Cell fill="#ef4444" />
-                </Pie>
-                <Legend iconType="circle" iconSize={10} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Actions */}
-      {quickActions.length > 0 && (
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-sm font-bold text-slate-800">Quick Actions</h3>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            {quickActions.map(({ label, to, icon: Icon, color }) => (
-              <Link
-                key={to}
-                to={to}
-                className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 ${color}`}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!loading && user?.role === 'admin' && (
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-          {assignToast && (
-            <div className="fixed top-4 right-4 z-50 rounded-xl bg-slate-800 px-4 py-3 text-sm text-white shadow-xl">
-              {assignToast}
-            </div>
-          )}
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-                <Layers className="h-4 w-4 text-indigo-600" />
-                Assign Faculty To Class Students
-              </h3>
-              <p className="mt-0.5 text-xs text-slate-400">
-                Pick one class, assign subjects and faculty. Faculty dashboard will show only students from those assigned classes.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={saveBulkAssignment}
-              disabled={assigning}
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60 transition-colors"
-            >
-              {assigning ? (
-                <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              Save Assignment
-            </button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Department</span>
-              <select
-                value={bulkForm.department}
-                onChange={(e) => setBulkForm((prev) => ({ ...prev, department: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {DEPARTMENTS.map((department) => <option key={department} value={department}>{department}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Semester</span>
-              <select
-                value={bulkForm.semester}
-                onChange={(e) => setBulkForm((prev) => ({ ...prev, semester: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {SEMESTERS.map((semester) => <option key={semester} value={semester}>Semester {semester}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Class / Section</span>
-              <select
-                value={bulkForm.section}
-                onChange={(e) => setBulkForm((prev) => ({ ...prev, section: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {SECTIONS.map((section) => <option key={section} value={section}>Section {section}</option>)}
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            {bulkForm.rows.map((row, index) => (
-              <div key={index} className="grid grid-cols-1 gap-2 rounded-xl bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
-                <select
-                  value={row.subject}
-                  onChange={(e) => updateBulkRow(index, 'subject', e.target.value)}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Select subject</option>
-                  {subjects.map((subject) => (
-                    <option key={subject._id} value={subject._id}>{subject.name} ({subject.code})</option>
-                  ))}
-                </select>
-                <select
-                  value={row.faculty}
-                  onChange={(e) => updateBulkRow(index, 'faculty', e.target.value)}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Select faculty</option>
-                  {faculty.map((member) => (
-                    <option key={member._id} value={member._id}>{member.name} {member.department ? `- ${member.department}` : ''}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => removeBulkRow(index)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove
-                </button>
+              <div className="mt-3 grid gap-2">
+                {roleTools.map(({ label, icon: Icon, to }) => (
+                  <Link key={label} to={to} className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">
+                    <Icon className="h-4 w-4 text-indigo-500" />
+                    {label}
+                  </Link>
+                ))}
               </div>
-            ))}
-          </div>
+            </section>
 
-          <button
-            type="button"
-            onClick={addBulkRow}
-            className="mt-3 inline-flex items-center gap-2 rounded-xl border border-dashed border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add Subject
-          </button>
-        </div>
-      )}
-
-      {!loading && user?.role === 'faculty' && (
-        <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-base font-semibold text-slate-700">My Assigned Students</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Students shown here come only from classes and subjects assigned by Admin.
-              </p>
-            </div>
-            <span className="rounded-lg bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-              {filteredFacultyStudents.length} / {kpis?.assignedStudents?.length || 0} students
-            </span>
-          </div>
-
-          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <select
-              value={facultyStudentFilters.department}
-              onChange={(event) => setFacultyStudentFilters((prev) => ({ ...prev, department: event.target.value }))}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Department</option>
-              {[...new Set((kpis?.assignedStudents || []).map((student) => student.department).filter(Boolean))].map((department) => (
-                <option key={department} value={department}>{department}</option>
-              ))}
-            </select>
-            <select
-              value={facultyStudentFilters.semester}
-              onChange={(event) => setFacultyStudentFilters((prev) => ({ ...prev, semester: event.target.value }))}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Semester</option>
-              {[...new Set((kpis?.assignedStudents || []).map((student) => student.semester).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map((semester) => (
-                <option key={semester} value={semester}>Semester {semester}</option>
-              ))}
-            </select>
-            <select
-              value={facultyStudentFilters.section}
-              onChange={(event) => setFacultyStudentFilters((prev) => ({ ...prev, section: event.target.value }))}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Section</option>
-              {[...new Set((kpis?.assignedStudents || []).map((student) => student.section).filter(Boolean))].map((section) => (
-                <option key={section} value={section}>Section {section}</option>
-              ))}
-            </select>
-            <select
-              value={facultyStudentFilters.subject}
-              onChange={(event) => setFacultyStudentFilters((prev) => ({ ...prev, subject: event.target.value }))}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Subject</option>
-              {facultySubjectOptions.map((assignment) => (
-                <option key={assignment.subject?._id || assignment.subject} value={assignment.subject?._id || assignment.subject}>
-                  {assignment.subject?.name || 'Subject'}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {Object.values(facultyStudentFilters).some(Boolean) && (
-            <button
-              type="button"
-              onClick={() => setFacultyStudentFilters({ department: '', semester: '', section: '', subject: '' })}
-              className="mb-4 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200 transition-colors"
-            >
-              Clear filters
-            </button>
-          )}
-
-          {Object.keys(filteredStudentGroups).length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
-              No students found for the selected filters.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {Object.entries(filteredStudentGroups).map(([className, students]) => (
-                <div key={className} className="rounded-xl border border-slate-100 overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3">
-                    <h4 className="font-bold text-slate-800">{className}</h4>
-                    <span className="text-xs font-semibold text-slate-400">{students.length} students</span>
-                  </div>
-                  <div className="divide-y divide-slate-50">
-                    {students.map((student) => (
-                      <div key={student._id} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-indigo-50/40 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                            {(student.name || '?').split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-slate-800 truncate">{student.name}</p>
-                            <p className="text-xs text-slate-400 truncate">{student.roll_no}</p>
-                          </div>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-xs font-bold text-slate-600">{student.department}</p>
-                          <p className="text-xs text-slate-400">Sem {student.semester} {student.section || ''}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!loading && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm lg:col-span-2">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-700">
-                  {user?.role === 'admin' ? 'Class Assignment Map' : 'My Assigned Classes'}
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Subject and faculty assignments are applied by department, semester, and class.
-                </p>
-              </div>
-              <span className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-                {kpis?.classCount || 0} classes
-              </span>
-            </div>
-
-            {Object.keys(assignmentGroups).length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
-                No class assignments yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {Object.entries(assignmentGroups).map(([className, assignments]) => (
-                  <div key={className} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <h4 className="font-bold text-slate-800">{className}</h4>
-                      <span className="text-xs font-semibold text-slate-400">{assignments.length} subjects</span>
+            <section className="col-span-8 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              {assignToast && <div className="fixed right-4 top-4 z-50 rounded-xl bg-slate-900 px-4 py-3 text-sm text-white shadow-xl">{assignToast}</div>}
+              {user?.role === 'admin' ? (
+                <>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">Quick Faculty Assignment</h3>
+                      <p className="text-xs text-slate-400">Assign one subject to one class without leaving dashboard.</p>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {assignments.map((assignment) => (
-                        <span key={assignment._id} className="inline-flex items-center gap-2 rounded-lg bg-white border border-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
-                          <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
-                          {assignment.subject?.name || 'Subject'}
-                          <span className="text-slate-300">/</span>
-                          {assignment.faculty?.name || 'Faculty'}
-                        </span>
+                    <button
+                      type="button"
+                      onClick={saveQuickAssignment}
+                      disabled={assigning}
+                      className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {assigning ? <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" /> : <Save className="h-4 w-4" />}
+                      Save
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    <select value={quickAssign.department} onChange={(e) => setQuickAssign((prev) => ({ ...prev, department: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      {DEPARTMENTS.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                    <select value={quickAssign.semester} onChange={(e) => setQuickAssign((prev) => ({ ...prev, semester: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      {SEMESTERS.map((item) => <option key={item} value={item}>Sem {item}</option>)}
+                    </select>
+                    <select value={quickAssign.section} onChange={(e) => setQuickAssign((prev) => ({ ...prev, section: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      {SECTIONS.map((item) => <option key={item} value={item}>Section {item}</option>)}
+                    </select>
+                    <select value={quickAssign.subject} onChange={(e) => setQuickAssign((prev) => ({ ...prev, subject: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      <option value="">Subject</option>
+                      {subjects.map((subject) => <option key={subject._id} value={subject._id}>{subject.name}</option>)}
+                    </select>
+                    <select value={quickAssign.faculty} onChange={(e) => setQuickAssign((prev) => ({ ...prev, faculty: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      <option value="">Faculty</option>
+                      {faculty.map((member) => <option key={member._id} value={member._id}>{member.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : user?.role === 'faculty' ? (
+                <>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">My Assigned Students</h3>
+                      <p className="text-xs text-slate-400">Only students assigned to you are counted here.</p>
+                    </div>
+                    <span className="rounded-lg bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{kpis?.assignedStudents?.length || 0} students</span>
+                  </div>
+                  {assignedStudents.length ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {assignedStudents.map((student) => (
+                        <Link key={student._id} to={`/students/${student._id}`} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm hover:bg-indigo-50">
+                          <span className="min-w-0 truncate font-semibold text-slate-700">{student.name}</span>
+                          <span className="text-xs text-slate-400">Sem {student.semester} {student.section}</span>
+                        </Link>
                       ))}
                     </div>
+                  ) : <EmptyPanel text="No assigned students yet." />}
+                </>
+              ) : (
+                <>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">My Classes</h3>
+                      <p className="text-xs text-slate-400">Subjects and faculty assigned to your class.</p>
+                    </div>
+                    <span className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">{kpis?.classCount || 0} classes</span>
                   </div>
-                ))}
-              </div>
-            )}
+                  {assignmentEntries.length ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {assignmentEntries.flatMap(([, assignments]) => assignments.slice(0, 2)).slice(0, 4).map((assignment) => (
+                        <div key={assignment._id} className="rounded-xl bg-slate-50 px-3 py-2">
+                          <p className="truncate text-sm font-bold text-slate-700">{assignment.subject?.name || 'Subject'}</p>
+                          <p className="truncate text-xs text-slate-400">{assignment.faculty?.name || 'Faculty'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <EmptyPanel text="No class assignments yet." />}
+                </>
+              )}
+            </section>
           </div>
-
-          <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-            <h3 className="text-base font-semibold text-slate-700 mb-4">
-              {user?.role === 'admin' ? 'Admin Controls' : user?.role === 'faculty' ? 'Faculty Workspace' : 'Student Workspace'}
-            </h3>
-            <div className="space-y-3">
-              {(roleTools[user?.role] || []).map(({ label, icon: Icon }) => (
-                <div key={label} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  {label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

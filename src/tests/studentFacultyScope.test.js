@@ -165,6 +165,51 @@ describe('Student faculty scoping', () => {
     expect(res.body.classCount).toEqual(2);
   });
 
+  it('lists only admin-assigned subjects for the logged-in faculty', async () => {
+    const facultyRes = await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Faculty Subject', email: 'subject-scope@test.com', password: 'password', role: 'faculty' });
+
+    const assignedToSubjectOnly = await Subject.create({
+      name: 'Subject Only',
+      code: 'SO101',
+      assignedFaculty: facultyRes.body._id
+    });
+    const classAssigned = await Subject.create({ name: 'Class Assigned', code: 'CA101' });
+    const otherClass = await Subject.create({ name: 'Other Class', code: 'OC101' });
+
+    await ClassAssignment.create({
+      department: 'CS',
+      semester: 1,
+      section: 'A',
+      subject: classAssigned._id,
+      faculty: facultyRes.body._id
+    });
+
+    const otherFacultyRes = await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Other Subject Faculty', email: 'other-subject-scope@test.com', password: 'password', role: 'faculty' });
+
+    await ClassAssignment.create({
+      department: 'CS',
+      semester: 1,
+      section: 'A',
+      subject: otherClass._id,
+      faculty: otherFacultyRes.body._id
+    });
+
+    const res = await request(app)
+      .get('/api/subjects')
+      .set('Authorization', `Bearer ${facultyRes.body.token}`);
+
+    const returnedIds = res.body.map((subject) => subject._id);
+
+    expect(res.statusCode).toEqual(200);
+    expect(returnedIds).toContain(classAssigned._id.toString());
+    expect(returnedIds).toContain(assignedToSubjectOnly._id.toString());
+    expect(returnedIds).not.toContain(otherClass._id.toString());
+  });
+
   it('returns students from faculty handled department and section', async () => {
     const subject = await Subject.create({ name: 'Database Systems', code: 'CS303' });
     const facultyRes = await request(app)

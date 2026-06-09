@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect } from 'react';
 import authService from '../services/authService';
+import { buildStoredUser, clearStoredAuth, getStoredAuth } from '../utils/authStorage';
 
 export const AuthContext = createContext(null);
 
@@ -10,18 +11,13 @@ export const AuthProvider = ({ children }) => {
 
   // Initialize Auth state from localStorage
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
+    const storedAuth = getStoredAuth();
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (e) {
-        // Clear corrupt storage
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
+    if (storedAuth.valid) {
+      setToken(storedAuth.token);
+      setUser(storedAuth.user);
+    } else {
+      clearStoredAuth();
     }
     setLoading(false);
   }, []);
@@ -31,22 +27,14 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await authService.login(email, password);
       
+      const nextUser = buildStoredUser(data);
+
       setToken(data.token);
-      setUser({
-        id: data._id,
-        name: data.name,
-        email: data.email,
-        role: data.role
-      });
+      setUser(nextUser);
 
       // Save to localStorage
       localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify({
-        id: data._id,
-        name: data.name,
-        email: data.email,
-        role: data.role
-      }));
+      localStorage.setItem('user', JSON.stringify(nextUser));
 
       if (rememberMe) {
         localStorage.setItem('remembered_email', email);
@@ -65,21 +53,13 @@ export const AuthProvider = ({ children }) => {
     try {
       const data = await authService.register(userData);
       
+      const nextUser = buildStoredUser(data);
+
       setToken(data.token);
-      setUser({
-        id: data._id,
-        name: data.name,
-        email: data.email,
-        role: data.role
-      });
+      setUser(nextUser);
 
       localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify({
-        id: data._id,
-        name: data.name,
-        email: data.email,
-        role: data.role
-      }));
+      localStorage.setItem('user', JSON.stringify(nextUser));
 
       return data;
     } finally {
@@ -90,8 +70,7 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearStoredAuth();
     window.location.href = '/login';
   };
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearStoredAuth, getStoredAuth } from '../utils/authStorage';
 
 const API = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -10,9 +11,13 @@ const API = axios.create({
 // Request interceptor to attach JWT Token
 API.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    const storedAuth = getStoredAuth();
+
+    if (storedAuth.valid) {
+      config.headers.Authorization = `Bearer ${storedAuth.token}`;
+    } else {
+      clearStoredAuth();
+      delete config.headers.Authorization;
     }
     return config;
   },
@@ -27,8 +32,7 @@ API.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       // Clear auth tokens and sync state
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      clearStoredAuth();
       
       // Redirect to login if we are not already there
       if (!window.location.pathname.endsWith('/login')) {

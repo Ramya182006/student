@@ -19,12 +19,19 @@ const getSubjects = async (req, res, next) => {
     let facultyProfile = null;
 
     if (req.user.role === 'faculty') {
-      facultyProfile = await User.findById(req.user._id).select('name email department handledSections handledSubjects');
-      const assignedSubjectIds = await ClassAssignment.distinct('subject', { faculty: req.user._id });
-      subjectFilter.$or = [
-        { assignedFaculty: req.user._id },
-        { _id: { $in: [...assignedSubjectIds, ...(facultyProfile?.handledSubjects || [])] } }
-      ];
+      const [assignedSubjectIds, directSubjectIds, profile] = await Promise.all([
+        ClassAssignment.distinct('subject', { faculty: req.user._id }),
+        Subject.distinct('_id', { assignedFaculty: req.user._id }),
+        User.findById(req.user._id).select('name email department handledSections handledSubjects')
+      ]);
+      facultyProfile = profile;
+      subjectFilter._id = {
+        $in: [
+          ...assignedSubjectIds,
+          ...directSubjectIds,
+          ...(facultyProfile?.handledSubjects || [])
+        ]
+      };
     }
 
     const subjects = await Subject.find(subjectFilter).populate('assignedFaculty', 'name email');
@@ -44,10 +51,15 @@ const getSubjects = async (req, res, next) => {
 
     const enrichedSubjects = subjects.map((subject) => {
       const json = subject.toObject();
+      const subjectId = subject._id.toString();
+      const assignedFacultyId = subject.assignedFaculty?._id || subject.assignedFaculty;
       const profileAssignments = req.user.role === 'faculty' &&
         facultyProfile?.department &&
         facultyProfile?.handledSections?.length &&
-        facultyProfile?.handledSubjects?.some((handledSubject) => handledSubject.toString() === subject._id.toString())
+        (
+          assignedFacultyId?.toString() === req.user._id.toString() ||
+          facultyProfile?.handledSubjects?.some((handledSubject) => handledSubject.toString() === subjectId)
+        )
           ? facultyProfile.handledSections.map((section) => ({
               _id: `${subject._id}-${facultyProfile.department}-${section}`,
               department: facultyProfile.department,
@@ -57,7 +69,7 @@ const getSubjects = async (req, res, next) => {
               faculty: facultyProfile
             }))
           : [];
-      json.classAssignments = [...(assignmentsBySubject[subject._id.toString()] || []), ...profileAssignments];
+      json.classAssignments = [...(assignmentsBySubject[subjectId] || []), ...profileAssignments];
       return json;
     });
     res.json(enrichedSubjects);

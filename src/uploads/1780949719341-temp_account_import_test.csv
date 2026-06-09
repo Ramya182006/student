@@ -1,0 +1,3 @@
+role,name,email,password,department,roll_no,semester,section,admission_year,gender,date_of_birth,phone,guardian_name,guardian_phone,address,designation,handled_sections,handled_subject_codes
+student,Harry Potter,harry_import@test.com,password,Gryffindor,S202,2,A,2026,Male,2006-01-01,9000000001,James Potter,9000000002,Hogwarts,,,
+faculty,Minerva McGonagall,minerva_import@test.com,password,Gryffindor,,,,,,,,,,,Professor,A,MATH101

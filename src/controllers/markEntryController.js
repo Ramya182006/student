@@ -145,17 +145,17 @@ const updateMarkEntry = async (req, res, next) => {
       });
     }
 
-    const { internal_marks, external_marks, version } = req.body;
+    const { internal_marks, external_marks, version, force = false } = req.body;
 
-    if (version === undefined) {
+    if (version === undefined && !force) {
       res.status(400);
       throw new Error('Version field is required for optimistic concurrency control');
     }
 
     // Optimistic Concurrency Check
-    if (parseInt(version) !== markEntry.version) {
+    if (!force && parseInt(version) !== markEntry.version) {
       const populatedRecord = await MarkEntry.findById(markEntry._id)
-        .populate('student_id', 'name roll_no isPublished')
+        .populate('student_id', 'name roll_no department semester isPublished')
         .populate('subject_id', 'name code')
         .populate('entered_by', 'name email role')
         .populate('updated_by', 'name email role');
