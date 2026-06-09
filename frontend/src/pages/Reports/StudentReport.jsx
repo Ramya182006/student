@@ -48,8 +48,16 @@ const StudentReport = () => {
     if (subjectId) acc[subjectId] = mark;
     return acc;
   }, {});
+  const uniqueAssignments = [];
+  const seenSubjectIds = new Set();
+  assignedSubjects.forEach((assignment) => {
+    const subjectId = assignment.subject?._id || assignment.subject;
+    if (!subjectId || seenSubjectIds.has(subjectId.toString())) return;
+    seenSubjectIds.add(subjectId.toString());
+    uniqueAssignments.push(assignment);
+  });
   const subjectRows = assignedSubjects.length
-    ? assignedSubjects.map((assignment) => ({
+    ? uniqueAssignments.map((assignment) => ({
         assignment,
         mark: markBySubject[assignment.subject?._id || assignment.subject],
       }))

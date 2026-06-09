@@ -5,6 +5,31 @@ const User = require('../models/userModel');
 const ClassAssignment = require('../models/classAssignmentModel');
 const { calculateGrade } = require('../utils/helpers');
 
+const toIdString = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object' && value._id) return value._id.toString();
+  return value.toString();
+};
+
+const buildFacultySubjectScope = async (facultyId) => {
+  const [faculty, directSubjects, classAssignments] = await Promise.all([
+    User.findById(facultyId).select('department handledSections handledSubjects'),
+    Subject.find({ assignedFaculty: facultyId }).select('_id'),
+    ClassAssignment.find({ faculty: facultyId }).select('subject')
+  ]);
+
+  const subjectIds = [
+    ...directSubjects.map((subject) => toIdString(subject._id)),
+    ...classAssignments.map((assignment) => toIdString(assignment.subject)),
+    ...(faculty?.handledSubjects || []).map((subject) => toIdString(subject))
+  ].filter(Boolean);
+
+  return {
+    faculty,
+    subjectIds: [...new Set(subjectIds)]
+  };
+};
+
 /**
  * Helper function to verify if the actor has permission to edit marks for a subject
  * Admin has full access, Faculty is limited to assigned subjects.
@@ -209,35 +234,20 @@ const getMarkEntries = async (req, res, next) => {
     const filter = {};
 
     if (req.user.role === 'faculty') {
-      const [faculty, facultySubjects, facultyStudents, classAssignments] = await Promise.all([
-        User.findById(req.user._id).select('department handledSections handledSubjects'),
-        Subject.find({ assignedFaculty: req.user._id }).select('_id'),
-        Student.find({ assignedFaculty: req.user._id }).select('_id'),
-        ClassAssignment.find({ faculty: req.user._id }).select('department semester section subject')
-      ]);
-      const profileMatches = faculty?.department && faculty?.handledSections?.length
-        ? faculty.handledSections.map((section) => ({ department: faculty.department, section }))
-        : [];
-      const studentMatches = [
-        ...classAssignments.map((assignment) => ({
-          department: assignment.department,
-          semester: assignment.semester,
-          section: assignment.section
-        })),
-        ...profileMatches
-      ];
-      const classStudents = studentMatches.length
-        ? await Student.find({
-            $or: studentMatches
-          }).select('_id')
-        : [];
+      const requestedSubjectId = req.query.subject_id ? String(req.query.subject_id) : null;
+      const { subjectIds } = await buildFacultySubjectScope(req.user._id);
 
-      const subjectIds = [...facultySubjects.map((subject) => subject._id), ...classAssignments.map((assignment) => assignment.subject), ...(faculty?.handledSubjects || [])];
-      const studentIds = [...facultyStudents.map((student) => student._id), ...classStudents.map((student) => student._id)];
-      filter.$or = [
-        { subject_id: { $in: subjectIds }, student_id: { $in: studentIds } },
-        { subject_id: { $in: facultySubjects.map((subject) => subject._id) } }
-      ];
+      if (requestedSubjectId && !subjectIds.includes(requestedSubjectId)) {
+        return res.status(403).json({
+          message: 'Forbidden: Faculty can view marks only for assigned subjects'
+        });
+      }
+
+      if (!subjectIds.length) {
+        return res.json([]);
+      }
+
+      filter.subject_id = { $in: subjectIds };
     }
 
     const entries = await MarkEntry.find(filter)

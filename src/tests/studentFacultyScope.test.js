@@ -258,4 +258,54 @@ describe('Student faculty scoping', () => {
     expect(returnedIds).not.toContain(otherDepartmentStudent._id.toString());
     expect(res.body.totalStudents).toEqual(1);
   });
+
+  it('returns each assigned subject only once when multiple assignment sources overlap', async () => {
+    const adminRes = await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Admin', email: 'admin-dup@test.com', password: 'password', role: 'admin' });
+
+    const facultyRes = await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Faculty Dup', email: 'faculty-dup@test.com', password: 'password', role: 'faculty' });
+
+    const subject = await Subject.create({
+      name: 'Algorithms',
+      code: 'CS302',
+      assignedFaculty: facultyRes.body._id
+    });
+
+    await User.findByIdAndUpdate(facultyRes.body._id, {
+      department: 'CS',
+      handledSections: ['A'],
+      handledSubjects: [subject._id]
+    });
+
+    await ClassAssignment.create({
+      department: 'CS',
+      semester: 1,
+      section: 'A',
+      subject: subject._id,
+      faculty: facultyRes.body._id
+    });
+
+    const student = await Student.create({
+      name: 'Duplicate Subject Student',
+      roll_no: 'CS999001',
+      department: 'CS',
+      semester: 1,
+      section: 'A'
+    });
+
+    const res = await request(app)
+      .get(`/api/students/${student._id}`)
+      .set('Authorization', `Bearer ${adminRes.body.token}`);
+
+    const subjectIds = (res.body.assignedSubjects || []).map((assignment) => assignment.subject?._id || assignment.subject);
+    const uniqueSubjectIds = [...new Set(subjectIds.map((id) => String(id)))];
+
+    expect(res.statusCode).toEqual(200);
+    expect(subjectIds.length).toEqual(1);
+    expect(uniqueSubjectIds.length).toEqual(1);
+    expect(uniqueSubjectIds[0]).toEqual(subject._id.toString());
+  });
 });

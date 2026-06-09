@@ -72,28 +72,34 @@ const getAssignedSubjectsForStudent = async (student) => {
       .populate('handledSubjects', 'name code')
   ]);
 
-  const existingKeys = new Set(
-    classAssignments.map((assignment) => `${assignment.subject?._id || assignment.subject}-${assignment.faculty?._id || assignment.faculty}`)
-  );
-  const profileAssignments = profileFaculty.flatMap((faculty) =>
-    (faculty.handledSubjects || [])
-      .filter((subject) => {
-        const key = `${subject._id}-${faculty._id}`;
-        if (existingKeys.has(key)) return false;
-        existingKeys.add(key);
-        return true;
-      })
-      .map((subject) => ({
+  const deduped = new Map();
+
+  const addAssignment = (assignment) => {
+    const subjectId = assignment?.subject?._id || assignment?.subject;
+    if (!subjectId) return;
+
+    const key = subjectId.toString();
+    if (!deduped.has(key)) {
+      deduped.set(key, assignment);
+    }
+  };
+
+  classAssignments.forEach(addAssignment);
+
+  profileFaculty.forEach((faculty) => {
+    (faculty.handledSubjects || []).forEach((subject) => {
+      addAssignment({
         _id: `${subject._id}-${faculty._id}-${student.department}-${student.section}`,
         department: student.department,
         semester: student.semester,
         section: student.section,
         subject,
         faculty
-      }))
-  );
+      });
+    });
+  });
 
-  return [...classAssignments, ...profileAssignments];
+  return [...deduped.values()];
 };
 
 const getReportReadiness = async (student) => {

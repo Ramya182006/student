@@ -168,7 +168,6 @@ const MarkEntry = () => {
 
   const subjectOptions = useMemo(() => {
     if (!classReady) return [];
-    if (user?.role === 'faculty') return subjects;
     return subjects.filter((subject) => subjectMatchesClass(subject, filters));
   }, [subjects, filters, classReady, user?.role, user?._id, user?.id]);
 

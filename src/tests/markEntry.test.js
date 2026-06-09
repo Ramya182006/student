@@ -115,6 +115,16 @@ describe('MarkEntry & Concurrency APIs', () => {
     markEntryId = res.body._id;
   });
 
+  it('should return 403 when Faculty B explicitly requests a subject not assigned to them', async () => {
+    const res = await request(app)
+      .get('/api/mark-entries')
+      .query({ subject_id: subjectId })
+      .set('Authorization', `Bearer ${facultyBToken}`);
+
+    expect(res.statusCode).toEqual(403);
+    expect(res.body.message).toContain('Faculty can view marks only for assigned subjects');
+  });
+
   it('should only list mark entries for the logged-in faculty', async () => {
     const facultyBMarkEntry = await MarkEntry.create({
       student_id: facultyBStudentId,

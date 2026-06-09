@@ -89,14 +89,24 @@ const ReportCard = () => {
   }, [students, search]);
 
   const rows = useMemo(() => {
+    const uniqueAssignments = [];
+    const seenSubjectIds = new Set();
+
+    assignedSubjects.forEach((assignment) => {
+      const subjectId = assignment.subject?._id || assignment.subject;
+      if (!subjectId || seenSubjectIds.has(subjectId.toString())) return;
+      seenSubjectIds.add(subjectId.toString());
+      uniqueAssignments.push(assignment);
+    });
+
     const markBySubject = marks.reduce((acc, mark) => {
       const subjectId = mark.subject_id?._id || mark.subject_id;
       if (subjectId) acc[subjectId] = mark;
       return acc;
     }, {});
 
-    if (assignedSubjects.length) {
-      return assignedSubjects.map((assignment) => {
+    if (uniqueAssignments.length) {
+      return uniqueAssignments.map((assignment) => {
         const subjectId = assignment.subject?._id || assignment.subject;
         return {
           id: assignment._id || subjectId,
